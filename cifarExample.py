@@ -7,35 +7,68 @@ import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 from alexNet import AlexNet
-from resNet import ResNet
+from resNet import ResNet18
+from western_blot import WBLOT   
 from tqdm import tqdm 
+import torch.multiprocessing as mp
+from torch.utils.data.distributed import DistributedSampler 
+from torch.nn.parallel import DistributedDataParallel as DDP 
+from torch import distributed as dist
+from datetime import timedelta
+import sklearn
+from torch.distributed import init_process_group, destroy_process_group
+import os 
+
+world_size = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else 0 
+world_rank = int(os.environ["RANK"]) if "RANK" in os.environ else 0 
+master = world_rank == 0 
+
+dist.init_process_group(backend="gloo",
+    rank = world_rank,
+    world_size = world_size,
+    timeout=timedelta(seconds=30),)
+torch.cuda.device(rank)
+
+
 classes = ("plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck")
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def imshow(img):
     """functions to show an image"""
     img = img / 2 + 0.5  # unnormalize
     npimg = img.numpy()
     plt.imshow(np.transpose(npimg, (1, 2, 0)))
-    plt.pause(2)  # show for 2 seconds # plt.show()
+    plt.savefig('figure.png')  # show for 2 seconds # plt.show()
 
 
 def show_images(loader):
     """show some images from the loader"""
 
     # get some random training images
-    dataiter = iter(loader)
-    images, labels = next(dataiter)
+   # dataiter = iter(loader)
+    #images, labels = next(dataiter)
 
     # show images
-    imshow(torchvision.utils.make_grid(images))
+    #imshow(torchvision.utils.make_grid(images))
     # print labels
-    print(" ".join(f"{classes[labels[j]]:5s}" for j in range(images.shape[0])))
+    print(" ".join(f"{classes[labels[j].argmax(dim=1)]:5s}" for j in range(images.shape[0])))
 
 
 def build_loaders():
     """returns both dataloaders"""
 
+    dataset = WBLOT()
+    idxs = list(range(len(dataset)))
+    test_size = 0.3
+    idxa, idxb = sklearn.model_selection.train_test_split(idxs, test_size=test_size, random_state=0)
+
+    dataseta = torch.utils.data.Subset(dataset, idxa)
+    datasetb = torch.utils.data.Subset(dataset, idxb)
+    datasets = [dataseta, datasetb]
+    
+    sampler = DistributedSampler(dataset) 
     transform = transforms.Compose(
         [
             transforms.ToTensor(),
@@ -46,14 +79,12 @@ def build_loaders():
     batch_size = 4
 
     loaders = dict()
-    for key, train in zip(["train", "test"], [True, False]):
-        dataset = torchvision.datasets.CIFAR10(
-            train=train, root="./data", download=True, transform=transform
-        )
+    for key, dataset in zip(["train", "test"], datasets):
         loader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=True, num_workers=2
+            dataset, batch_size=batch_size, shuffle=False, num_workers=2,sampler = DistributedSampler(dataset) 
         )
         loaders[key] = loader
+   
 
     return loaders
 
@@ -83,13 +114,14 @@ def train(model, loader, optimizer, criterion):
 
  
     epochs = 10
-    prog = tqdm(total=epochs)
+    prog = tqdm(total=epochs, leave=False)
     for epoch in range(epochs):  # loop over the dataset multiple times
 
         losses = []
         for data in tqdm(loader, leave=False):
             X, Y = data
-
+            X = X.to(device) 
+            Y = Y.to(device)
             # zero the parameter gradients
             optimizer.zero_grad()
 
@@ -149,20 +181,25 @@ def print_shape(model,input, output):
     print(model.__class__.__name__)
    # print(len(input)) 
    # print(input)
+    print(type(input))
+    print(input)
     print(f'input:{input[0].shape}|output:{output[0].shape}')
     print()
 
-h = torch.nn.modules.module.register_module_forward_hook(print_shape)
 #    """docstring"""
 
 # Initialize model
  
 def main():
+    
 
     loaders = build_loaders()
-    show_images(loaders["train"])
-    model = AlexNet()
-
+    #show_images(loaders["train"])
+    model = ResNet18()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model = DDP(model)
+    h = model.module.register_forward_hook(print_shape)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
@@ -175,6 +212,6 @@ def main():
 
     inference(model, loaders["test"])
 
-
+        
 if __name__ == "__main__":
     main()
