@@ -147,7 +147,14 @@ def inference(model, loader):
     correct, total = 0, 0
     with torch.no_grad():  # since we're not training, we don't need to calculate the gradients for our outputs
         for (X, Y) in loader:
-            Yh = model(X)  # calculate outputs by running images through the network
+            X = X.to(device)
+            Y = Y.to(device)
+            print(f'X device: {X.device} | Y device {Y.device} | model: {model.device}')
+            print(torch.cuda.device(X))
+            print(torch.cuda.device(Y))
+            quit()
+            #Yh = model(X)  # calculate outputs by running images through the network
+
             _, Yh = torch.max(
                 Yh, dim=1
             )  # the class with the highest energy is what we choose as prediction
@@ -160,11 +167,10 @@ def inference(model, loader):
 class TheModelClass(nn.Module):
     def __init__(self):
         super(TheModelClass, self).__init__()
-        self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(6, 16, 5)
         self.fc1 = nn.Linear(16 * 5 * 5, 120)
-        self.fc2 = nn.Linear(120, 84)
+        self.fc2 =nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 10)
 
     def forward(self, x):
@@ -191,15 +197,15 @@ def print_shape(model,input, output):
 # Initialize model
  
 def main():
-    
 
     loaders = build_loaders()
     #show_images(loaders["train"])
     model = ResNet18()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    #model.cuda()
     model.to(device)
-    model = DDP(model)
-    h = model.module.register_forward_hook(print_shape)
+    model = DDP(model, device_ids=[rank]) 
+    #h = model.module.register_forward_hook(print_shape)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
@@ -207,8 +213,9 @@ def main():
 
     # save and/or load model
     PATH = "cifar_model.pt"
-    torch.save(model.state_dict(),PATH)
+    torch.save(model.module.state_dict(), PATH)
     model.load_state_dict(torch.load(PATH))
+    #optimzer.load_state_dict()
 
     inference(model, loaders["test"])
 
