@@ -28,7 +28,6 @@ dist.init_process_group(backend="gloo",
     rank = world_rank,
     world_size = world_size,
     timeout=timedelta(seconds=60),)
-torch.cuda.device_count()
 
 
 classes = ("plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck")
@@ -198,7 +197,7 @@ def print_shape(model,input, output):
 # Initialize model
  
 def main():
-    dist.init.process_group(backend='nccl', init_method='env://')
+    #torch.distributed.init.process_group(backend='nccl', init_method='env://')
     torch.cuda.set_device(rank) 
 
 
