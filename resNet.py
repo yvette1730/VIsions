@@ -27,15 +27,15 @@ class Res_Block(nn.Module):  # @save
         self.bn2 = nn.BatchNorm2d(num_channels)
 
     def forward(self, X):
-        # Y = F.relu(self.bn1(self.conv1(X)))
-        print(f'input shape: {X.shape}')
-        Y = self.conv1(X)
-        print(Y.shape)
-        Y = self.bn1(Y)
-        print(Y.shape)
-        Y = F.relu(Y)
-        print(Y.shape)
+        Y = F.relu(self.bn1(self.conv1(X)))
+        #print(f'input shape: {X.shape}')
+        #print(Y.shape)
+        #print(Y.shape)
+        #print(Y.shape)
         Y = self.bn2(self.conv2(Y))
+       # print(X.get_device())
+        #print(Y.get_device())
+
         if self.conv3:
             X = self.conv3(X)
         Y += X
@@ -100,6 +100,8 @@ def test():
     print(imgs.shape)
 
     print(r18(imgs))
+    #print(X.get_device())
+    #print(Y.get_device())
 
 def main():
     """docstring"""

@@ -19,7 +19,7 @@ import sklearn
 from torch.distributed import init_process_group, destroy_process_group
 import os 
 
-world_size = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+world_size = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1 
 rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else 0 
 world_rank = int(os.environ["RANK"]) if "RANK" in os.environ else 0 
 master = world_rank == 0 
@@ -27,14 +27,14 @@ master = world_rank == 0
 dist.init_process_group(backend="gloo",
     rank = world_rank,
     world_size = world_size,
-    timeout=timedelta(seconds=30),)
-torch.cuda.device(rank)
+    timeout=timedelta(seconds=60),)
+torch.cuda.device_count()
 
 
 classes = ("plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+#device = torch.cuda.device(rank)
 def imshow(img):
     """functions to show an image"""
     img = img / 2 + 0.5  # unnormalize
@@ -81,7 +81,7 @@ def build_loaders():
     loaders = dict()
     for key, dataset in zip(["train", "test"], datasets):
         loader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=False, num_workers=2,sampler = DistributedSampler(dataset) 
+            dataset, batch_size=batch_size, shuffle=False, num_workers=8,sampler = DistributedSampler(dataset) 
         )
         loaders[key] = loader
    
@@ -120,8 +120,8 @@ def train(model, loader, optimizer, criterion):
         losses = []
         for data in tqdm(loader, leave=False):
             X, Y = data
-            X = X.to(device) 
-            Y = Y.to(device)
+            X = X.to('cuda') 
+            Y = Y.to('cuda')
             # zero the parameter gradients
             optimizer.zero_grad()
 
@@ -147,13 +147,15 @@ def inference(model, loader):
     correct, total = 0, 0
     with torch.no_grad():  # since we're not training, we don't need to calculate the gradients for our outputs
         for (X, Y) in loader:
-            X = X.to(device)
-            Y = Y.to(device)
+            X = X.to('cuda')
+            Y = Y.to('cuda')
             print(f'X device: {X.device} | Y device {Y.device} | model: {model.device}')
-            print(torch.cuda.device(X))
-            print(torch.cuda.device(Y))
-            quit()
-            #Yh = model(X)  # calculate outputs by running images through the network
+            #print(torch.cuda.device(X))
+            #print(torch.cuda.device(Y))
+            #print(X.get_device())
+            #print(Y.get_device())
+            #quit()
+            Yh = model(X)  # calculate outputs by running images through the network
 
             _, Yh = torch.max(
                 Yh, dim=1
@@ -189,7 +191,6 @@ def print_shape(model,input, output):
    # print(input)
     print(type(input))
     print(input)
-    print(f'input:{input[0].shape}|output:{output[0].shape}')
     print()
 
 #    """docstring"""
@@ -197,15 +198,18 @@ def print_shape(model,input, output):
 # Initialize model
  
 def main():
+    dist.init.process_group(backend='nccl', init_method='env://')
+    torch.cuda.set_device(rank) 
+
 
     loaders = build_loaders()
-    #show_images(loaders["train"])
-    model = ResNet18()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    #model.cuda()
-    model.to(device)
-    model = DDP(model, device_ids=[rank]) 
-    #h = model.module.register_forward_hook(print_shape)
+    model = ResNet18().to(device) 
+    model = DDP(model, device_ids=[rank])
+    if torch.cuda.is_available():
+        device_ids = [rank % torch.cuda.device_count()]
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=device_ids)
+    else: 
+        model = torch.nn.parallel.DistributedDataParallel(model) 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
